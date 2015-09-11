@@ -32,15 +32,13 @@
  *				Modified to allow dim rate in Preferences. Added ability to dim during On/Off commands and included this option in Preferences. Defaults are "Normal" and no dim for On/Off.
  *	Change 7:	2015-01-09	(tslagle13)
  *				dimOnOff is was boolean, and switched to enum. Properly update "rampOn" and "rampOff" when refreshed or a polled (dim transition for On/Off commands)
- *	Change 8:	2015-03-06	(Juan Risso)
- *				Slider range from 0..100
- *	Change 9:	2015-03-06	(Juan Risso)
- *				Setlevel -> value to integer (to prevent smartapp calling this function from not working).
+ *  	Change 8:   	2015-09-06  	(Sticks18)
+ *              		Modified tile layout to make use of new multiattribute tile for dimming. Added dim adjustment when sending setLevel() if bulb is off, so it will transition smoothly from 0.
+ *
  *
  */
-
 metadata {
-	definition (name: "GE Link Bulb", namespace: "smartthings", author: "SmartThings") {
+	definition (name: "My GE Link Bulb v2", namespace: "jscgs350", author: "smartthings") {
 
     	capability "Actuator"
         capability "Configuration"
@@ -49,45 +47,60 @@ metadata {
         capability "Switch"
 		capability "Switch Level"
         capability "Polling"
+        
+        attribute "attDimRate", "string"
+        attribute "attDimOnOff", "string"
 
 		fingerprint profileId: "0104", inClusters: "0000,0003,0004,0005,0006,0008,1000", outClusters: "0019"
 	}
 
 	// UI tile definitions
-	tiles {
-		standardTile("switch", "device.switch", width: 2, height: 2, canChangeIcon: true) {
-			state "on", label: '${name}', action: "switch.off", icon: "st.switches.light.on", backgroundColor: "#79b821", nextState:"turningOff"
-			state "off", label: '${name}', action: "switch.on", icon: "st.switches.light.off", backgroundColor: "#ffffff", nextState:"turningOn"
- 			state "turningOn", label:'${name}', action: "switch.off", icon:"st.switches.light.on", backgroundColor:"#79b821", nextState:"turningOff"
-            state "turningOff", label:'${name}', action: "switch.on", icon:"st.switches.light.off", backgroundColor:"#ffffff", nextState:"turningOn"
+	tiles(scale: 2) {
+		multiAttributeTile(name: "switch", type: "lighting", width: 6, height: 4, canChangeIcon: true, canChangeBackground: true) {
+			tileAttribute("device.switch", key: "PRIMARY_CONTROL") {
+                  attributeState "off", label: '${name}', action: "switch.on", icon: "st.switches.light.off", backgroundColor: "#ffffff", nextState: "turningOn"
+			      attributeState "on", label: '${name}', action: "switch.off", icon: "st.switches.light.on", backgroundColor: "#79b821", nextState: "turningOff"
+                  attributeState "turningOff", label: '${name}', action: "switch.on", icon: "st.switches.light.off", backgroundColor: "#ffffff", nextState: "turningOn"
+			      attributeState "turningOn", label: '${name}', action: "switch.off", icon: "st.switches.light.on", backgroundColor: "#79b821", nextState: "turningOff"
+            }
+            tileAttribute("device.level", key: "SLIDER_CONTROL") {
+                  attributeState "level", action:"switch level.setLevel"
+            }
+            tileAttribute("level", key: "SECONDARY_CONTROL") {
+                  attributeState "level", label: 'Light dimmed to ${currentValue}%'
+            }    
 		}
-		standardTile("refresh", "device.switch", inactiveLabel: false, decoration: "flat") {
+	standardTile("refresh", "device.switch", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
 			state "default", label:"", action:"refresh.refresh", icon:"st.secondary.refresh"
-		}
-		controlTile("levelSliderControl", "device.level", "slider", height: 1, width: 3, inactiveLabel: false, range:"(0..100)") {
-			state "level", action:"switch level.setLevel"
-		}
-		valueTile("level", "device.level", inactiveLabel: false, decoration: "flat") {
-			state "level", label: 'Level ${currentValue}%'
-		}
-
-		main(["switch"])
-		details(["switch", "level", "levelSliderControl", "refresh"])
 	}
-
+        valueTile("attDimRate", "device.attDimRate", inactiveLabel: false, decoration: "flat", width: 4, height: 1) {
+			state "attDimRate", label: 'Dim rate: ${currentValue}'
+	}
+        valueTile("attDimOnOff", "device.attDimOnOff", inactiveLabel: false, decoration: "flat", width: 4, height: 1) {
+			state "attDimOnOff", label: 'Dim for on/off: ${currentValue}'
+	}
+	controlTile("levelSliderControl", "device.level", "slider", height: 2, width: 6, inactiveLabel: false, range: "(0..100)") {
+			state "level", action:"switch level.setLevel"
+	}
+        
+        
+		main "switch"
+		details(["switch","attDimRate", "refresh", "attDimOnOff","levelSliderControl"])
+	}
+	
 	    preferences {
-
+        
         	input("dimRate", "enum", title: "Dim Rate", options: ["Instant", "Normal", "Slow", "Very Slow"], defaultValue: "Normal", required: false, displayDuringSetup: true)
             input("dimOnOff", "enum", title: "Dim transition for On/Off commands?", options: ["Yes", "No"], defaultValue: "No", required: false, displayDuringSetup: true)
-
+            
     }
 }
 
 // Parse incoming device messages to generate events
 def parse(String description) {
 	log.trace description
-
-    if (description?.startsWith("on/off:")) {
+    
+    if (description?.startsWith("on/off:")) {    
 		log.debug "The bulb was sent a command to do something just now..."
 		if (description[-1] == "1") {
         	def result = createEvent(name: "switch", value: "on")
@@ -99,7 +112,7 @@ def parse(String description) {
             return result
         }
     }
-
+    
     def msg = zigbee.parse(description)
 
 	if (description?.startsWith("catchall:")) {
@@ -108,39 +121,45 @@ def parse(String description) {
 
         def x = description[-4..-1]
         // log.debug x
+		def z = description[18]
+        
+        if (z == "8"){}
+        
+        else {
+        
+        	switch (x) 
+        	{
 
-        switch (x)
-        {
+        		case "0000":
 
-        	case "0000":
+            		def result = createEvent(name: "switch", value: "off")
+            		log.debug "${result?.descriptionText}"
+           			return result
+                	break
 
-            	def result = createEvent(name: "switch", value: "off")
-            	log.debug "${result?.descriptionText}"
-           		return result
-                break
+            	case "1000":
 
-            case "1000":
+            		def result = createEvent(name: "switch", value: "off")
+            		log.debug "${result?.descriptionText}"
+           			return result
+                	break
 
-            	def result = createEvent(name: "switch", value: "off")
-            	log.debug "${result?.descriptionText}"
-           		return result
-                break
+            	case "0100":
 
-            case "0100":
+            		def result = createEvent(name: "switch", value: "on")
+            		log.debug "${result?.descriptionText}"
+           			return result
+                	break
 
-            	def result = createEvent(name: "switch", value: "on")
-            	log.debug "${result?.descriptionText}"
-           		return result
-                break
+            	case "1001":
 
-            case "1001":
-
-            	def result = createEvent(name: "switch", value: "on")
-            	log.debug "${result?.descriptionText}"
-           		return result
-                break
-        }
-    }
+            		def result = createEvent(name: "switch", value: "on")
+            		log.debug "${result?.descriptionText}"
+           			return result
+                	break
+        	}
+    	}
+    }    
 
     if (description?.startsWith("read attr")) {
 
@@ -154,7 +173,7 @@ def parse(String description) {
 			sendEvent( name: "level", value: i )
         	sendEvent( name: "switch.setLevel", value: i) //added to help subscribers
 
-    	}
+    	} 
 
     	else {
 
@@ -162,15 +181,15 @@ def parse(String description) {
         		// log.debug description[-2..-1]
         		def i = Math.round(convertHexToInt(description[-2..-1]) / 256 * 100 )
 				sendEvent( name: "level", value: i )
-        		sendEvent( name: "switch.setLevel", value: i) //added to help subscribers
-        	}
+        		sendEvent( name: "switch.setLevel", value: i) //added to help subscribers   
+        	}    
 
         	if (description[-2..-1] == state.lvl) {
         		// log.debug description[-2..-1]
         		def i = Math.round(convertHexToInt(description[-2..-1]) / 256 * 100 )
 				sendEvent( name: "level", value: i )
         		sendEvent( name: "switch.setLevel", value: i) //added to help subscribers
-        	}
+        	}    
 
     	}
     }
@@ -182,18 +201,21 @@ def poll() {
     [
 	"st rattr 0x${device.deviceNetworkId} 1 6 0", "delay 500",
     "st rattr 0x${device.deviceNetworkId} 1 8 0", "delay 500",
-    "st wattr 0x${device.deviceNetworkId} 1 8 0x10 0x21 {${state?.dOnOff ?: '0000'}}"
+    "st wattr 0x${device.deviceNetworkId} 1 8 0x10 0x21 {${state.dOnOff}}"
     ]
-
+    
 }
 
 def updated() {
-
+	
+    sendEvent( name: "attDimRate", value: "${dimRate}" )
+    sendEvent( name: "attDimOnOff", value: "${dimOnOff}" )
+    
 	state.dOnOff = "0000"
-
+    
 	if (dimRate) {
 
-		switch (dimRate)
+		switch (dimRate) 
         	{
 
         		case "Instant":
@@ -213,24 +235,24 @@ def updated() {
             		state.rate = "2500"
                     if (dimOnOff) { state.dOnOff = "0025"}
                		break
-
+                
             	case "Very Slow":
-
+            
             		state.rate = "3500"
                     if (dimOnOff) { state.dOnOff = "0035"}
                 	break
 
         	}
-
+    
     }
-
+    
     else {
-
+    
     	state.rate = "1500"
         state.dOnOff = "0000"
-
+        
     }
-
+    
         if (dimOnOff == "Yes"){
 			switch (dimOnOff){
         		case "InstantOnOff":
@@ -250,20 +272,20 @@ def updated() {
             		state.rate = "2500"
                     if (state.rate == "2500") { state.dOnOff = "0025"}
                		break
-
+                
             	case "Very SlowOnOff":
-
+            
             		state.rate = "3500"
                     if (state.rate == "3500") { state.dOnOff = "0035"}
                 	break
 
         	}
-
+            
     }
     else{
     	state.dOnOff = "0000"
     }
-
+    
     "st wattr 0x${device.deviceNetworkId} 1 8 0x10 0x21 {${state.dOnOff}}"
 
 
@@ -288,26 +310,28 @@ def off() {
 }
 
 def refresh() {
-
+    
     [
 	"st rattr 0x${device.deviceNetworkId} 1 6 0", "delay 500",
     "st rattr 0x${device.deviceNetworkId} 1 8 0", "delay 500",
-    "st wattr 0x${device.deviceNetworkId} 1 8 0x10 0x21 {${state?.dOnOff ?: '0000'}}"
+    "st wattr 0x${device.deviceNetworkId} 1 8 0x10 0x21 {${state.dOnOff}}"
     ]
     poll()
-
+    
 }
 
 def setLevel(value) {
 
     def cmds = []
-	value = value as Integer
+
 	if (value == 0) {
 		sendEvent(name: "switch", value: "off")
 		cmds << "st cmd 0x${device.deviceNetworkId} 1 8 0 {0000 ${state.rate}}"
 	}
 	else if (device.latestValue("switch") == "off") {
-		sendEvent(name: "switch", value: "on")
+        cmds << "st cmd 0x${device.deviceNetworkId} 1 8 0 {00 0000}"
+        cmds << "delay 200"
+        sendEvent(name: "switch", value: "on")
 	}
 
     sendEvent(name: "level", value: value)
@@ -320,7 +344,7 @@ def setLevel(value) {
     if (dimRate) {
     	cmds << "st cmd 0x${device.deviceNetworkId} 1 8 4 {${level} ${state.rate}}"
     }
-    else {
+    else {   
     	cmds << "st cmd 0x${device.deviceNetworkId} 1 8 4 {${level} 1500}"
     }
 
@@ -330,8 +354,9 @@ def setLevel(value) {
 
 def configure() {
 
-	log.debug "Configuring Reporting and Bindings."
-	def configCmds = [
+	String zigbeeId = swapEndianHex(device.hub.zigbeeId)
+	log.debug "Confuguring Reporting and Bindings."
+	def configCmds = [	
 
         //Switch Reporting
         "zcl global send-me-a-report 6 0 0x10 0 3600 {01}", "delay 500",
